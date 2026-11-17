@@ -37,6 +37,8 @@ public class BridgeService extends Service {
 
     public static final String ACTION_START = "com.tangyuan.bridge.START";
     public static final String ACTION_STOP  = "com.tangyuan.bridge.STOP";
+    /** 用户是否希望桥在跑（false = 主动停的，复活 Job 不要擅自拉起） */
+    public static final String PREF_SHOULD_RUN = "should_run";
     public static final String ACTION_RECONNECT = "com.tangyuan.bridge.RECONNECT";
 
     // 给 UI 读的状态
@@ -62,12 +64,15 @@ public class BridgeService extends Service {
     public void onCreate() {
         super.onCreate();
         serviceRunning = true;
+        ReviveJob.schedule(this);   // 15 分钟一次的复活闹钟，Job 自己会防重入
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : ACTION_START;
         if (ACTION_STOP.equals(action)) {
+            getSharedPreferences("bridge", Context.MODE_PRIVATE).edit()
+                    .putBoolean(PREF_SHOULD_RUN, false).apply();
             shutdown();
             stopForeground(true);
             stopSelf();
@@ -77,6 +82,8 @@ public class BridgeService extends Service {
         }
 
         startForegroundCompat();
+        getSharedPreferences("bridge", Context.MODE_PRIVATE).edit()
+                .putBoolean(PREF_SHOULD_RUN, true).apply();
 
         if (ble == null) {
             // 恢复上次登记的屏幕参数
@@ -262,6 +269,24 @@ public class BridgeService extends Service {
                     case "on":  wd.setEnabled(true); break;
                     case "off": wd.setEnabled(false); break;
                     case "fix": return wd.checkNow("manual").toString();
+                    case "probe": return wd.probePackage(arg).toString();
+                    case "stopself": {
+                        // 仅供测试：自愿停服务（不走 force-stop），验证复活 Job 这条链路
+                        new Thread(() -> {
+                            try { Thread.sleep(400); } catch (InterruptedException ignored) { }
+                            shutdown();
+                            stopForeground(true);
+                            stopSelf();
+                        }).start();
+                        return "{\"ok\":true,\"action\":\"stopping\"}";
+                    }
+                    case "revive": {
+                        // 给外部（插件/用户）一个把桥服务叫回来的入口
+                        Intent i = new Intent(BridgeService.this, BridgeService.class)
+                                .setAction(ACTION_START);
+                        startForegroundService(i);
+                        return "{\"ok\":true,\"action\":\"start_requested\"}";
+                    }
                     case "add": if (!arg.isEmpty()) wd.addTarget(arg); break;
                     case "del": if (!arg.isEmpty()) wd.removeTarget(arg); break;
                     default: break;

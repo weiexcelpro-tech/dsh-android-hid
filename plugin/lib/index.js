@@ -915,6 +915,9 @@ export function apply(ctx) {
             `盯 ${targets.length} 个服务，当前缺失 ${miss.length} 个，累计修复 ${d.fixes ?? 0} 次`,
           ];
           if (miss.length) lines.push(`缺失：${miss.join(' , ')}`);
+          const stopped = d.stopped ?? [];
+          if (stopped.length) lines.push(`被系统强停（已尝试拉起）：${stopped.join(' , ')}`);
+          if (d.launches) lines.push(`累计拉起被强停的 App：${d.launches} 次`);
           if (d.action) lines.push(`本次动作：${d.action}`);
           if (d.hint) lines.push(`提示：${d.hint}`);
           if (d.last) lines.push(`最近事件：${d.last}`);

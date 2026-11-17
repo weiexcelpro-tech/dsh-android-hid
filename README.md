@@ -169,6 +169,35 @@ curl -s '127.0.0.1:8893/watch?op=add&arg=com.foo/com.foo.BarService'
 实测（OnePlus 6T / LineageOS 22.2 / Android 15）：摘服务、关总开关、两者同时关，
 全部在 **1 秒内**复原；`op=off` 后确实不再干预，`op=on` 一开立刻补回。
 
+### 自愈的三层：谁救谁
+
+| 层 | 触发方式 | 兜住什么 | 生效时间 |
+|---|---|---|---|
+| 看门狗 | `Settings.Secure` 变化（事件驱动） | 无障碍条目被抹 / 总开关被写成 0 | **1 秒** |
+| 拉起被强停的 App | 条目缺失 + 目标包带 `FLAG_STOPPED` | dsh-go 被 force-stop 后卡在 stopped 状态（此时写回设置也不会绑定） | 同一次检查 |
+| 复活 Job | `JobScheduler` 每 15 分钟 | 桥服务自己被停/被系统回收（非 force-stop） | ≤15 分钟 |
+
+验证方法（都在真机上做过）：
+
+```bash
+# ① 后台拉起被强停的 App 这条路通不通
+curl -s '127.0.0.1:8893/watch?op=probe&arg=com.android.settings'
+#   → {"stopped":true,"awake":"launched"}
+adb shell "dumpsys activity activities | grep topResumedActivity"
+#   → com.android.settings/.Settings   ← 真被拉到前台了
+
+# ② 复活 Job
+curl -s '127.0.0.1:8893/watch?op=stopself'          # 让服务自杀（测试用）
+adb shell "cmd jobscheduler run -f com.tangyuan.bridge 8801"
+adb logcat -d -s TYRevive:I | tail
+#   → I TYRevive: revived bridge service
+```
+
+**唯一救不回来的是桥自己被 force-stop**：Android 会把 App 标成 stopped，
+之后任何 Job / 广播都不再送达 —— 这是系统设计，没有 App 能绕过。
+重新打开 App 或重启手机就会立刻恢复（实测 6 秒内 `missing=0`）。
+所以：**别手动强停汤圆蓝牙桥**，其余交给它自己。
+
 ## 目录结构
 
 ```

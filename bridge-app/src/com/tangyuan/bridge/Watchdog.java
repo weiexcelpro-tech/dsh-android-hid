@@ -1,6 +1,9 @@
 package com.tangyuan.bridge;
 
 import android.content.ContentResolver;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.ContentObserver;
@@ -63,6 +66,9 @@ public class Watchdog {
     private volatile String lastEvent = "";
     private volatile long lastEventAt = 0;
     private volatile int fixCount = 0;
+    private volatile int launchCount = 0;
+    private volatile String lastLaunch = "";
+    private final java.util.Map<String, Long> lastLaunchAt = new java.util.HashMap<>();
     private volatile boolean running = false;
 
     public Watchdog(Context ctx) {
@@ -209,6 +215,74 @@ public class Watchdog {
         return out;
     }
 
+    /** 哪些目标包被系统标成了 stopped（force-stop 之后就是这状态：写回设置也不会绑定）。 */
+    public List<String> stoppedTargets() {
+        List<String> out = new ArrayList<>();
+        PackageManager pm = ctx.getPackageManager();
+        for (String t : targets()) {
+            String pkg = t.contains("/") ? t.substring(0, t.indexOf('/')) : t;
+            try {
+                ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                if ((ai.flags & ApplicationInfo.FLAG_STOPPED) != 0) out.add(pkg);
+            } catch (Throwable ignored) { }
+        }
+        return out;
+    }
+
+    /**
+     * 把被强停的包拉起来（只有这一下能清掉 stopped 状态，服务才会重新绑定）。
+     * 后台启动 Activity 可能被系统拦截 —— 拦了就如实记 launch_blocked，不装作成功。
+     */
+    private String awake(String pkg) {
+        try {
+            Long prev = lastLaunchAt.get(pkg);
+            long now = System.currentTimeMillis();
+            if (prev != null && now - prev < 60000L) return "cooldown";
+            PackageManager pm = ctx.getPackageManager();
+            Intent i = pm.getLaunchIntentForPackage(pkg);
+            if (i == null) return "no_launcher";
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            ctx.startActivity(i);
+            lastLaunchAt.put(pkg, now);
+            launchCount++;
+            lastLaunch = pkg;
+            Log.i(TAG, "awake " + pkg);
+            return "launched";
+        } catch (Throwable t) {
+            Log.w(TAG, "awake failed " + pkg + ": " + t);
+            return "launch_failed:" + t.getClass().getSimpleName();
+        }
+    }
+
+    /** 遍历被强停的目标并尝试拉起，返回尝试过的包名。 */
+    private JSONArray reviveStopped() {
+        JSONArray done = new JSONArray();
+        for (String pkg : stoppedTargets()) {
+            String r = awake(pkg);
+            try { done.put(pkg + ":" + r); } catch (Exception ignored) { }
+        }
+        return done;
+    }
+
+    /** 诊断：查任意包是否处于 stopped 状态，并可尝试拉起（测试用，不改无障碍设置）。 */
+    public JSONObject probePackage(String pkg) {
+        JSONObject o = new JSONObject();
+        try {
+            PackageManager pm = ctx.getPackageManager();
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            boolean stopped = (ai.flags & ApplicationInfo.FLAG_STOPPED) != 0;
+            o.put("pkg", pkg);
+            o.put("installed", true);
+            o.put("stopped", stopped);
+            o.put("launcher", pm.getLaunchIntentForPackage(pkg) != null);
+            if (stopped) o.put("awake", awake(pkg));
+        } catch (Throwable t) {
+            try { o.put("pkg", pkg); o.put("installed", false); o.put("err", String.valueOf(t)); }
+            catch (Exception ignored) { }
+        }
+        return o;
+    }
+
     /** 立刻检查一次；force=true 时不看开关（用于手动"现在修一下"）。 */
     public JSONObject checkNow(String reason) {
         JSONObject r = new JSONObject();
@@ -272,6 +346,9 @@ public class Watchdog {
             r.put("action", !ok ? "write_failed" : (miss.isEmpty() ? "master_on" : "restored"));
             r.put("added", new JSONArray(miss));
             r.put("accessibility_enabled", masterOk ? 1 : 0);
+            // 条目写回来了，但被 force-stop 的包仍然不会绑定 —— 得先把它拉起来
+            JSONArray revived = reviveStopped();
+            if (revived.length() > 0) r.put("revived", revived);
             Log.i(TAG, (ok ? "restored " : "write failed ") + miss + " master=" + masterOk);
             final Handler hv = handler;
             if (hv != null) hv.postDelayed(() -> checkNow("verify"), 1500);
@@ -300,6 +377,9 @@ public class Watchdog {
             o.put("master", masterOn());
             o.put("missing", new JSONArray(missing()));
             o.put("fixes", fixCount);
+            o.put("launches", launchCount);
+            o.put("stopped", new JSONArray(stoppedTargets()));
+            if (!lastLaunch.isEmpty()) o.put("last_launch", lastLaunch);
             o.put("last", lastEvent);
             o.put("last_at", lastEventAt);
             if (!permitted()) {
@@ -321,6 +401,7 @@ public class Watchdog {
             o.put("master", masterOn());
             o.put("miss", missing().size());
             o.put("fix", fixCount);
+            o.put("stop", stoppedTargets().size());
             return o.toString();
         } catch (Throwable t) {
             return "{\"on\":false}";
