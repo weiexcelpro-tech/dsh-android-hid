@@ -13,6 +13,15 @@
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
 
+// C3 SuperMini 没接 UART，日志只能走 USB CDC；S3 保持原样（UART0 走 CH343）
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+#define LOGF(...) do { logPort.printf(__VA_ARGS__); Serial.printf(__VA_ARGS__); } while (0)
+#define LOGB(s)   do { logPort.println(s);             Serial.println(s);          } while (0)
+#else
+#define LOGF(...) logPort.printf(__VA_ARGS__)
+#define LOGB(s)   logPort.println(s)
+#endif
+
 // 触摸屏集合开关：
 //   0（默认）= 只出 键盘 + 消费控制 + 绝对鼠标。
 //     BLE/uhid 触摸屏在 Android 上会被判成「外接且无 display viewport」，
@@ -85,7 +94,7 @@ static void screenLoad() {
     AXES = 1;
     MODE = 1;   // 这一版专测单点触摸屏：不再让 NVS/调用方把它改回鼠标
     AXES = 1;   // Stylus 描述符下 Android 两轴量程都报长边 → 必须方形映射
-    logPort.printf("[screen] restored %ux%u rot=%u den=%u axes=%s mode=%s\n",
+    LOGF("[screen] restored %ux%u rot=%u den=%u axes=%s mode=%s\n",
                    PANEL_W, PANEL_H, ROT, denom(), AXES ? "square" : "split",
                    MODE == 0 ? "mouse" : "touch");
 }
@@ -145,6 +154,7 @@ static const uint8_t REPORT_MAP[] = {
 };
 
 HardwareSerial logPort(0);
+
 NimBLEHIDDevice *hid;
 NimBLECharacteristic *kbdIn, *touchIn, *consIn, *mouseIn, *rxChar, *txChar;
 volatile bool linkConnected = false, kbdSub = false, touchSub = false, consSub = false, mouseSub = false;
@@ -177,7 +187,7 @@ static bool notifyRetry(NimBLECharacteristic *c, const uint8_t *d, size_t n, int
         if (c->notify(d, n)) return true;
         delay(12);          // 等主机把 ATT 队列消化掉再试，6ms 太急
     }
-    logPort.printf("[hid] notify failed after %d tries\n", tries);
+    LOGF("[hid] notify failed after %d tries\n", tries);
     return false;
 }
 
@@ -251,7 +261,7 @@ static bool touchRaw(uint16_t px, uint16_t py, bool tip) {
     if (!touchIn || !touchSub) return false;
     for (int i = 0; i < 3; ++i) {
         if (touchIn->notify(d, sizeof(d))) {
-            logPort.printf("[touch] -> touchIn(%p) len=%d d0=%02X x=%u y=%u\n",
+            LOGF("[touch] -> touchIn(%p) len=%d d0=%02X x=%u y=%u\n",
                            (void *)touchIn, (int)sizeof(d), d[0], (unsigned)lx, (unsigned)ly);
             return true;
         }
@@ -529,13 +539,13 @@ void reply(JsonDocument &doc, bool ok, const char *t, const char *err = nullptr)
     g_replyClipped = false;
     String out;
     serializeJson(doc, out);
-    logPort.println(out);                                    // CH343 → 树莓派
+    LOGB(out);                                    // CH343 → 树莓派
     if (Serial) Serial.println(out);                          // 原生 USB(OTG) → 手机
     if (g_replySink) *g_replySink = out;                      // HTTP → 插件
     if (txChar) {
         // 不再用 linkConnected 当门闩：它可能在重连后没置位，而回包照样该试一发。
         bool sent = notifyRetry(txChar, (const uint8_t *)out.c_str(), out.length());
-        if (!sent) logPort.println("[ble] reply notify FAILED (nobody subscribed?)");
+        if (!sent) LOGB("[ble] reply notify FAILED (nobody subscribed?)");
     }
 }
 
@@ -578,7 +588,7 @@ void handleCommand(const String &line) {
         reply(r, true, "ble_clear_bonds");     // 先回，免得调用方干等（马上要断链）
         delay(120);
         NimBLEDevice::deleteAllBonds();
-        logPort.println("[ble] all bonds erased, re-advertising");
+        LOGB("[ble] all bonds erased, re-advertising");
         if (Serial) Serial.println("[ble] all bonds erased");
         NimBLEDevice::getAdvertising()->start();
         return;
@@ -595,7 +605,7 @@ void handleCommand(const String &line) {
     }
     if (t == "wifi_status") {
         String st = wifilink::statusJson();          // 已是完整 JSON
-        logPort.println(st);
+        LOGB(st);
         if (Serial) Serial.println(st);
         if (g_replySink) *g_replySink = st;
         return;
@@ -620,7 +630,7 @@ void handleCommand(const String &line) {
         g_screenSynced = (PANEL_W > 100 && PANEL_H > 100);
         screenSave();                    // 落 NVS：掉电/重启后坐标依然正确
         reply(r, true, "screen");
-        logPort.printf("screen=%ux%u rot=%u den=%u axes=%s logical=%ux%u scale=%ux%u\n",
+        LOGF("screen=%ux%u rot=%u den=%u axes=%s logical=%ux%u scale=%ux%u\n",
                        PANEL_W, PANEL_H, ROT, denom(), AXES ? "square" : "split",
                        logicalW(), logicalH(), denX(), denY());
         return;
@@ -633,7 +643,7 @@ void handleCommand(const String &line) {
         else           ok = touchUp();
         g_replyRot = ROT; g_replyPx = g_tipX; g_replyPy = g_tipY;
         g_replyClipped = !ok;
-        logPort.printf("[touch] %s was_down=%d ok=%d drops=%u\n", t.c_str(), was, ok, g_tipDrops);
+        LOGF("[touch] %s was_down=%d ok=%d drops=%u\n", t.c_str(), was, ok, g_tipDrops);
         reply(r, true, t.c_str());
         return;
     }
@@ -642,7 +652,7 @@ void handleCommand(const String &line) {
         g_tip = false;
         const bool ok = (MODE == 0) ? mouseRaw(g_tipX, g_tipY, 0x00)
                                     : touchRawOOR(g_tipX, g_tipY);
-        logPort.printf("[touch] leave ok=%d mode=%s\n", ok, MODE == 0 ? "mouse" : "touch");
+        LOGF("[touch] leave ok=%d mode=%s\n", ok, MODE == 0 ? "mouse" : "touch");
         g_replyRot = ROT; g_replyPx = g_tipX; g_replyPy = g_tipY;
         reply(r, ok, "leave", ok ? nullptr : "notify_failed");
         return;
@@ -739,7 +749,7 @@ class ServerCB : public NimBLEServerCallbacks {
         linkConnected = true;
         // 请求 7.5~15ms 连接间隔（NimBLE 单位 1.25ms）
         s->updateConnParams(info.getConnHandle(), 6, 12, 0, 400);
-        logPort.println("[ble] connected (7.5~15ms)");
+        LOGB("[ble] connected (7.5~15ms)");
         // 关键：连接后继续广播，允许第二个中心（树莓派）同时接入发命令。
         // 否则手机一连上就停止广播 → Pi 扫不到、无法下发命令（实测撞到）。
         NimBLEDevice::startAdvertising();
@@ -753,10 +763,10 @@ class ServerCB : public NimBLEServerCallbacks {
         if (!linkUp()) { kbdSub = touchSub = consSub = mouseSub = false; txSub = false; }
         // 设备都掉了，Android 侧会自行取消触摸；这里同步清状态，免得看门狗空转。
         if (touchIsDown()) {
-            logPort.printf("[touch] link lost while pressed (drops=%u) -> 手机端需锁屏解锁清幽灵手指\n", g_tipDrops);
+            LOGF("[touch] link lost while pressed (drops=%u) -> 手机端需锁屏解锁清幽灵手指\n", g_tipDrops);
             g_tip = false;
         }
-        logPort.printf("[ble] disconnected reason=%d, re-advertising\n", reason);
+        LOGF("[ble] disconnected reason=%d, re-advertising\n", reason);
         NimBLEDevice::startAdvertising();
     }
 };
@@ -772,7 +782,7 @@ class RepCB : public NimBLECharacteristicCallbacks {
         if (c == consIn) consSub = (subValue > 0);
         if (c == mouseIn) mouseSub = (subValue > 0);
         if (c == txChar) txSub = (subValue > 0);
-        logPort.printf("[ble] subscribe %s -> %d\n",
+        LOGF("[ble] subscribe %s -> %d\n",
                        c == kbdIn ? "kbd" : (c == touchIn ? "touch"
                        : (c == consIn ? "consumer" : (c == mouseIn ? "mouse" : "?"))), subValue);
     }
@@ -788,11 +798,27 @@ class RxCB : public NimBLECharacteristicCallbacks {
 };
 
 // ---------------- setup / loop ----------------
+// 日志串口引脚随芯片走：S3 是 44/43（板载 CH343），C3 是 UART0 默认 20/21
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+#define LOG_RX 20
+#define LOG_TX 21
+#else
+#define LOG_RX 44
+#define LOG_TX 43
+#endif
+
 void setup() {
-    logPort.begin(115200, SERIAL_8N1, 44, 43);   // rx=44, tx=43
+    logPort.begin(115200, SERIAL_8N1, LOG_RX, LOG_TX);
     delay(200);
-    logPort.println();
-    logPort.printf("=== hid_ble_nimble %s ===\n", FW_VERSION);
+    LOGB();
+    LOGF("=== hid_ble_nimble %s ===\n", FW_VERSION);
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+    LOGF("[sys] target=ESP32-C3  flash=%uMB  free=%uKB\n",
+                   (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)), (unsigned)(ESP.getFreeHeap() / 1024));
+#else
+    LOGF("[sys] target=ESP32-S3  flash=%uMB  free=%uKB\n",
+                   (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)), (unsigned)(ESP.getFreeHeap() / 1024));
+#endif
     screenLoad();                     // 先恢复上次登记的屏幕，再开 BLE
     serialLine.reserve(1024);
     bleLine.reserve(1024);
@@ -802,6 +828,11 @@ void setup() {
     // 注意：UART0 仍由 logPort 独立占用，COM 口日志不受影响。
     Serial.begin(115200);
     Serial.setTxTimeoutMs(0);      // 主机没连时写入不阻塞
+    // C3 SuperMini 没有接到树莓派的 UART，日志只能走 USB，所以横幅两边都打一份
+    Serial.printf("\n=== hid_ble_nimble %s (USB/CDC) ===\n", FW_VERSION);
+    Serial.printf("[sys] flash=%uMB heap=%uKB\n",
+                  (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)),
+                  (unsigned)(ESP.getFreeHeap() / 1024));
 
     wifilink::begin();          // Wi-Fi 在后台连，连不上也不挡 BLE
 
@@ -817,14 +848,14 @@ void setup() {
     hid->setPnp(0x02, 0x303A, 0x4001, 0x0100);
     hid->setHidInfo(0, 1);
     hid->setReportMap(const_cast<uint8_t *>(REPORT_MAP), sizeof(REPORT_MAP));
-    logPort.println("[hid] ---- input report chars ----");
+    LOGB("[hid] ---- input report chars ----");
     kbdIn = hid->getInputReport(1);
 #if WITH_TOUCH
     touchIn = hid->getInputReport(5);   // 单点触摸屏用 Report ID 5（2 是鼠标）
 #endif
     consIn = hid->getInputReport(3);
     mouseIn = hid->getInputReport(2);
-    logPort.printf("[hid] kbd=%p touch=%p cons=%p mouse=%p mode=%u (touch==mouse? %s)\n",
+    LOGF("[hid] kbd=%p touch=%p cons=%p mouse=%p mode=%u (touch==mouse? %s)\n",
                    (void *)kbdIn, (void *)touchIn, (void *)consIn, (void *)mouseIn, MODE,
                    (touchIn == mouseIn) ? "YES!!" : "no");
     kbdIn->setCallbacks(new RepCB());
@@ -852,8 +883,8 @@ void setup() {
     hid->setBatteryLevel(100);
     kbdReport(0, 0);
     touchUp();
-    logPort.println("ready: BLE advertising (NimBLE)");
-    logPort.printf("screen default %ux%u rot=%u den=%u\n", PANEL_W, PANEL_H, ROT, denom());
+    LOGB("ready: BLE advertising (NimBLE)");
+    LOGF("screen default %ux%u rot=%u den=%u\n", PANEL_W, PANEL_H, ROT, denom());
 
 }
 
@@ -864,7 +895,7 @@ void loop() {
     // 看门狗：手指按下超过 6s 还没抬起 → 一定有事件丢了，强制收尾。
     // 没有这道保险，丢一次 UP 就会让手机所有手势失效（只能锁屏解锁救）。
     if (touchIsDown() && (millis() - g_tipSince) > TIP_WATCHDOG_MS) {
-        logPort.printf("[touch] WATCHDOG release (held %lums, drops=%u)\n",
+        LOGF("[touch] WATCHDOG release (held %lums, drops=%u)\n",
                        (unsigned long)(millis() - g_tipSince), g_tipDrops);
         touchUp();
     }

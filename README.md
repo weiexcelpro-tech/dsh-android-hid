@@ -77,12 +77,31 @@ esp32_shot 看一眼 → esp32_ui 拿控件中心坐标（或直接看截图）
 
 ### 1. 烧固件（一次性，需要一台电脑）
 
+同一份源码支持两种板子，编译时选对应 env 即可：
+
 ```bash
 cd firmware/hid_ble_nimble
-pio run -t upload          # ESP32-S3 DevKitC-1 / 8MB Flash
+
+# ESP32-S3 DevKitC-1（8MB Flash，板载 CH343 串口）
+pio run -e esp32_s3_devkitc -t upload --upload-port /dev/ttyUSB0
+
+# ESP32-C3 SuperMini（4MB Flash，只有原生 USB-Serial/JTAG）
+pio run -e esp32_c3_supermini -t upload --upload-port /dev/ttyACM0
 ```
 
-板子只要 5V 供电，**不需要联网**。
+| | ESP32-S3 DevKitC-1 | ESP32-C3 SuperMini |
+|---|---|---|
+| 尺寸 | 大板，双 USB 口 | **22×18 mm，指甲盖大** |
+| RAM 占用 | 20.2%（66 KB / 320 KB） | **14.8%（48 KB / 320 KB）** |
+| Flash 占用 | 29.8%（997 KB / 3.2 MB） | **32.6%（1.0 MB / 3 MB）** |
+| 分区表 | `default_8MB.csv` | `huge_app.csv`（默认 1.2 MB 放不下） |
+| 日志 | UART0 → CH343 → `/dev/ttyACM0` | **USB CDC**（UART0 仍在 GPIO20/21，但不接线也能看日志） |
+| 协议/工具/App | 完全相同 | 完全相同 |
+
+C3 的两处差异只在固件里用 `#if defined(CONFIG_IDF_TARGET_ESP32C3)` 隔离（日志串口引脚、USB 镜像），
+HID 描述符、坐标换算、看门狗、命令协议**一行没动**。
+
+板子只要 5V 供电，**不需要联网**。换板子后手机要重新配对一次（BLE MAC 变了）。
 
 ### 2. 手机装桥 App 并配对
 
