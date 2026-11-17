@@ -144,7 +144,7 @@ use esp32_status and tell me the transport, screen and whether ble is connected
 
 | 项 | 值 |
 |---|---|
-| 手机 | 荣耀 400（Android 16） |
+| 手机 | OnePlus 6T（fajita）· LineageOS 22.2 · Android 15 |
 | 板子 | ESP32-S3 DevKitC-1 / 8 MB |
 | dsh-go | 1.0.14（DSH 0.2.2-rc.1） |
 | 插件测试 | `node --test test/` → 22 pass |
