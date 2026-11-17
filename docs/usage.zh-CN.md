@@ -141,6 +141,35 @@ HTTP：http://127.0.0.1:8893
 它跟 dsh-go 自己的「DSH 手机操控」无障碍**可以同时开**，不冲突。
 关掉它只是不能截图/读树，点按打字仍然可用。
 
+### 2.5 授权看门狗（一次性 adb，强烈建议）
+
+dsh-go 的「手机操控」会被系统悄无声息地关掉（App 更新、省电清理、厂商安全中心、误触）。
+桥 App 带看门狗，能在 **1 秒内**把它补回来 —— 但要一条一次性授权：
+
+```bash
+adb shell pm grant com.tangyuan.bridge android.permission.WRITE_SECURE_SETTINGS
+```
+
+Windows / macOS 同理，装好 platform-tools 后在同一条命令里把手机连上即可。刷机前一直有效。
+
+**没授权也能用 App**，只是看门狗不写设置，`/watch` 里会显示 `"permitted": false` 并提示这条命令。
+
+验证：
+
+```bash
+adb forward tcp:18893 tcp:8893          # 可选：把手机的 8893 映射到电脑
+curl -s 127.0.0.1:8893/watch            # permitted 应该是 true
+```
+
+```
+{"ok":true,"on":true,"permitted":true,"running":true,
+ "targets":["io.github.ccch1mneyyy.dsh_app/…PhoneA11yService",
+            "com.tangyuan.bridge/com.tangyuan.bridge.CapService"],
+ "master":true,"missing":[],"fixes":0,"last":""}
+```
+
+想看它真的干活，可以故意把 dsh-go 的无障碍关掉，几秒后刷新设置页 —— 开关自己回来了。
+
 ---
 
 ## 3. 手机侧（第二步）：给 dsh-go 装插件
@@ -282,6 +311,30 @@ E  ESP32 键鼠
 ### 7.2 插件报「App 桥在线，但蓝牙没连上」
 
 桥活着但 BLE 断了。就是 §7.1 的第 2–3 步。桥会自动重连，等 10 秒再看。
+
+### 7.2b dsh-go 的「手机操控」自己关了 / 智能体突然说无障碍不可用
+
+这是最常见的「莫名其妙」故障，两种形态：
+
+| 形态 | 看这里 | 谁在捣乱 |
+|---|---|---|
+| 无障碍里「DSH 手机操控」变灰、开关自己关掉 | 设置 › 无障碍 | App 更新、省电清理、安全中心、误触 |
+| 开关明明开着，智能体还是说「无障碍未启用」 | `curl 127.0.0.1:8893/watch` 看 `master` | 总开关 `accessibility_enabled` 被写成 0，服务在列表里但系统层面算关 |
+
+先做一次性授权，之后看门狗会自己处理（不需要你再去点开关）：
+
+```bash
+adb shell pm grant com.tangyuan.bridge android.permission.WRITE_SECURE_SETTINGS
+```
+
+已经在犯的话，立刻修一次：
+
+```bash
+curl -s '127.0.0.1:8893/watch?op=fix'
+```
+
+`/watch` 里 `fixes` 一直涨说明有东西在反复关它（多半是省电策略），
+把桥 App 和 dsh-go 都加进「电池 › 无限制」会安静很多。
 
 ### 7.3 `esp32_shot` 报 503 / `screenshot_failed`
 

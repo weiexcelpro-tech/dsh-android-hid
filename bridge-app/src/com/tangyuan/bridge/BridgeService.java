@@ -47,6 +47,7 @@ public class BridgeService extends Service {
 
     private BleClient ble;
     private HttpServer http;
+    private Watchdog wd;
 
     private final ArrayBlockingQueue<String> replies = new ArrayBlockingQueue<>(8);
 
@@ -102,6 +103,11 @@ public class BridgeService extends Service {
             http = new HttpServer(new Gateway());
             http.start();
             ble.start();
+            // 看门狗：盯住无障碍开关，被系统关掉就补回来
+            if (wd == null) {
+                wd = new Watchdog(this);
+                wd.start();
+            }
         } else if (ACTION_RECONNECT.equals(action)) {
             // 用户/插件主动要求重连：先断再连，不用等退避
             ble.stop();
@@ -144,6 +150,7 @@ public class BridgeService extends Service {
               .append("\"tip\":").append(lastTip == null ? "null" : lastTip.toString()).append(',')
               .append("\"need_screen\":").append(needScreenJson()).append(',')
               .append("\"cap\":").append(CapService.ready()).append(',')
+              .append("\"watch\":").append(wd == null ? "null" : wd.shortJson()).append(',')
               .append("\"screen\":{\"known\":").append(screenKnown)
               .append(",\"w\":").append(lastW).append(",\"h\":").append(lastH)
               .append(",\"rot\":").append(lastRot).append("},")
@@ -245,6 +252,25 @@ public class BridgeService extends Service {
             }
             return cap.treeJson(maxNodes);
         }
+        // ---- 看门狗 ----
+        @Override public String watch(java.util.Map<String, String> q) {
+            if (wd == null) return "{\"ok\":false,\"err\":\"not_started\"}";
+            String op = q.getOrDefault("op", "status");
+            String arg = q.getOrDefault("arg", "");
+            try {
+                switch (op) {
+                    case "on":  wd.setEnabled(true); break;
+                    case "off": wd.setEnabled(false); break;
+                    case "fix": return wd.checkNow("manual").toString();
+                    case "add": if (!arg.isEmpty()) wd.addTarget(arg); break;
+                    case "del": if (!arg.isEmpty()) wd.removeTarget(arg); break;
+                    default: break;
+                }
+            } catch (Throwable t) {
+                return "{\"ok\":false,\"err\":\"" + esc(String.valueOf(t)) + "\"}";
+            }
+            return wd.statusJson();
+        }
         @Override public void log(String s) { BridgeService.this.log(s); }
     }
 
@@ -301,6 +327,7 @@ public class BridgeService extends Service {
     }
 
     private void shutdown() {
+        if (wd != null) { wd.stop(); wd = null; }
         if (http != null) http.stop();
         if (ble != null) ble.stop();
         http = null;

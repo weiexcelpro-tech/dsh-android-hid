@@ -68,8 +68,8 @@ esp32_shot 看一眼 → esp32_ui 拿控件中心坐标（或直接看截图）
 | 组件 | 位置 | 说明 |
 |---|---|---|
 | **固件** | [`firmware/hid_ble_nimble`](firmware/hid_ble_nimble) | ESP32-S3 + NimBLE，BLE HID 键盘/鼠标 + 消费类控制键，NUS 串口收发命令 |
-| **桥 App** | [`bridge-app`](bridge-app) | 37 KB 的安卓 App：替你握住 BLE 连接、暴露本机 HTTP、提供截图与控件树 |
-| **DSH 插件** | [`plugin`](plugin) | 15 个 `esp32_*` 工具，自动选通道（App 桥 / USB-OTG / WiFi） |
+| **桥 App** | [`bridge-app`](bridge-app) | 41 KB 的安卓 App：替你握住 BLE 连接、暴露本机 HTTP、提供截图与控件树 |
+| **DSH 插件** | [`plugin`](plugin) | 17 个 `esp32_*` 工具，自动选通道（App 桥 / USB-OTG / WiFi） |
 
 完整安装说明见 **[docs/usage.zh-CN.md](docs/usage.zh-CN.md)**。
 
@@ -95,6 +95,11 @@ adb install -r TangyuanBridge.apk
 2. 手机 **设置 › 蓝牙** 配对 `Tangyuan HID N` ← **必须先配对**
 3. 回 App 点「启动桥接」，看到 `ready · 订阅完成 mtu=255`
 4. 设置 › 无障碍 › 打开 **汤圆屏幕读取**（给智能体眼睛）
+5. **（强烈建议）授权看门狗** —— 让无障碍被系统关掉后能自动爬起来：
+
+```bash
+adb shell pm grant com.tangyuan.bridge android.permission.WRITE_SECURE_SETTINGS
+```
 
 ### 3. dsh-go 装插件
 
@@ -122,6 +127,47 @@ use esp32_status and tell me the transport, screen and whether ble is connected
 | 手势 | `esp32_swipe` `esp32_long` `esp32_sync` `esp32_release` | 滑、长按、按住、松手 |
 | 输入 | `esp32_text` `esp32_key` `esp32_akey` | 打字 / 组合键 / 系统键（home、back、音量…） |
 | 维护 | `esp32_screen` `esp32_status` `esp32_scan` `esp32_a11y` | 登记屏幕、查状态、扫通道、查无障碍 |
+| 看门狗 | `esp32_watch` | 无障碍被系统关掉会自动补回；查状态 / 立刻修 / 暂停 / 加目标 |
+
+## 看门狗：无障碍被关掉会自己爬起来
+
+Android 会莫名其妙把无障碍关掉 —— App 更新、省电清理、厂商安全中心、误触、系统审计。
+表现就是智能体突然**瞎了、点不动**，用户还得手动跑去设置里重开。
+
+桥 App 自带看门狗，**事件驱动**（监听 `Settings.Secure` 变化，不是轮询）：
+
+| 故障形态 | 真实表现 | 看门狗怎么修 |
+|---|---|---|
+| 服务从启用列表消失 | 无障碍里「DSH 手机操控」变灰 | 把组件名拼回 `enabled_accessibility_services` |
+| 总开关被关 | 服务还在列表、也还绑着，但 `AccessibilityManager.isEnabled()` 返回 false —— 智能体**自己判断**「我被关了」，于是拒绝干活 | 把 `accessibility_enabled` 写回 `1` |
+
+第二种最阴险：光看列表是「一切正常」的。看门狗两个都盯。
+
+前置是一次性 adb 授权（`WRITE_SECURE_SETTINGS` 是 development 级权限，普通安装拿不到）：
+
+```bash
+adb shell pm grant com.tangyuan.bridge android.permission.WRITE_SECURE_SETTINGS
+```
+
+没授权时它**不会瞎写**，只在 `/watch` 里报 `permitted:false` 并给出这条命令。
+
+```bash
+curl -s 127.0.0.1:8893/watch              # 盯着谁、缺谁、修了几次
+curl -s '127.0.0.1:8893/watch?op=fix'     # 立刻检查一遍
+curl -s '127.0.0.1:8893/watch?op=off'     # 暂停（不想跟系统对着干时）
+curl -s '127.0.0.1:8893/watch?op=on'      # 恢复
+curl -s '127.0.0.1:8893/watch?op=add&arg=com.foo/com.foo.BarService'
+```
+
+实现细节（踩过的坑）：
+
+- **冷却期不能丢事件**：列表被摘和总开关被关往往前后脚发生（系统一次写两个 key），
+  修完 2.5 秒内到的事件要**排队重试**，不能直接 return —— 否则留下「服务都在、总开关是 0」的僵尸状态。
+- **修完 1.5 秒再自检一次**：防止系统在我们写完后又把值改回去。
+- 兜底每 5 分钟巡检一次，只防观察者丢事件，正常路径完全靠事件。
+
+实测（OnePlus 6T / LineageOS 22.2 / Android 15）：摘服务、关总开关、两者同时关，
+全部在 **1 秒内**复原；`op=off` 后确实不再干预，`op=on` 一开立刻补回。
 
 ## 目录结构
 
@@ -133,10 +179,11 @@ use esp32_status and tell me the transport, screen and whether ble is connected
 ├── bridge-app/                安卓桥 App（无 Gradle，javac + d8 + aapt 直编）
 │   ├── src/…/BleClient.java   BLE 连接与命令队列
 │   ├── src/…/HttpServer.java  127.0.0.1:8893 的极简 HTTP
-│   └── src/…/CapService.java  无障碍：截图 + 控件树
+│   ├── src/…/CapService.java  无障碍：截图 + 控件树
+│   └── src/…/Watchdog.java    看门狗：无障碍被关掉自动补回
 ├── plugin/                    DSH 插件
 │   ├── lib/client.js          通道探测与 HTTP 客户端
-│   └── lib/index.js           15 个工具
+│   └── lib/index.js           17 个工具
 └── docs/usage.zh-CN.md        完整使用说明与故障排查
 ```
 
@@ -147,7 +194,7 @@ use esp32_status and tell me the transport, screen and whether ble is connected
 | 手机 | OnePlus 6T（fajita）· LineageOS 22.2 · Android 15 |
 | 板子 | ESP32-S3 DevKitC-1 / 8 MB |
 | dsh-go | 1.0.14（DSH 0.2.2-rc.1） |
-| 插件测试 | `node --test test/` → 22 pass |
+| 插件测试 | `node --test test/` → 27 pass（含看门狗 5 例） |
 
 实测记录：智能体截图 → 用 `esp32_tap` 点 (76,136) → 再截图 → 准确描述出「抽屉滑出、盖住 3/4 屏、
 头部 DSH 图标 + 新对话按钮、筛选行 全部/运行中/待确认/未读…」并建议「再点同一位置收起」。

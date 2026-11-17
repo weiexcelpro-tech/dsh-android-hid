@@ -388,3 +388,26 @@ export async function a11yTree({ max = 300, signal } = {}) {
   }
   return await getJson(`${p.base}/a11y?tree=1&max=${Math.max(20, Math.min(1500, Number(max) || 300))}`, 15000, signal);
 }
+
+// ---------------------------------------------------------------- 看门狗
+// 桥 1.3.0+ 自带无障碍看门狗：dsh-go 的手机操控被系统关掉会自动补回。
+// 老桥没有 /watch（404）—— 抛可读错误，别让调用方猜。
+
+/** 查询/操作看门狗。op: status | on | off | fix | add | del */
+export async function watchdog(op = 'status', arg = '', { signal } = {}) {
+  const p = await probe({ signal });
+  if (!p.ok) {
+    const detail = p.tried.map((t) => `${t.base} → ${t.error}`).join('; ');
+    throw new Error(`连不上桥，查不到看门狗。试过：${detail}`);
+  }
+  const qs = new URLSearchParams({ op });
+  if (arg) qs.set('arg', arg);
+  try {
+    return await getJson(`${p.base}/watch?${qs}`, 15000, signal);
+  } catch (e) {
+    if (String(e?.message ?? '').includes('404')) {
+      throw new Error('桥不支持 /watch：请把「汤圆蓝牙桥」升级到 1.3.0+');
+    }
+    throw e;
+  }
+}

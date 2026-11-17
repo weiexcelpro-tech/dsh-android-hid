@@ -11,7 +11,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { probe, send, screenInfo, screenSet, a11yInfo, lastA11y, discover, screenshot, a11yTree } from './client.js';
+import { probe, send, screenInfo, screenSet, a11yInfo, lastA11y, discover, screenshot, a11yTree, watchdog } from './client.js';
 import { statusView, actionView, panelView } from './view.js';
 
 export const name = 'dsh-esp32-hid';
@@ -858,6 +858,75 @@ export function apply(ctx) {
             pkg: d.pkg ?? '',
             count: d.count ?? lines.length,
             detail: `前台：${d.pkg ?? '?'}　共 ${d.count ?? lines.length} 个节点\n${lines.join('\n') || '（空）'}`,
+          };
+        } catch (e) {
+          return { ok: false, detail: String(e?.message ?? e) };
+        }
+      },
+    }),
+  );
+
+  // ---- 看门狗：dsh-go 的手机操控被系统关掉后，桥会自动补回来 ----
+  ctx.tools.register(
+    defineTool({
+      name: 'esp32_watch',
+      description:
+        "Inspect or control the bridge's accessibility watchdog. The Android system keeps silently disabling accessibility services (app updates, battery savers, vendor security suites), which kills the agent's phone control. The watchdog listens to the settings change and writes the service back within a second. op=status reports whether it is running and which targets are currently missing; op=fix forces an immediate check; op=off pauses it when you deliberately want the service off; op=add/del edits the watched component list (arg = package/service).",
+      parameters: {
+        op: {
+          type: 'string',
+          enum: ['status', 'on', 'off', 'fix', 'add', 'del'],
+          description: 'Action: status (default), on, off, fix, add, del.',
+        },
+        arg: {
+          type: 'string',
+          description: 'Component name for add/del, e.g. com.example.app/com.example.app.MyService',
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            ok: { type: 'boolean' },
+            on: { type: 'boolean' },
+            permitted: { type: 'boolean' },
+            targets: { type: 'array' },
+            missing: { type: 'array' },
+            fixes: { type: 'number' },
+            detail: { type: 'string' },
+          },
+          required: ['ok'],
+        },
+        render: (_a, v) => [{ type: 'text', text: v.detail ?? '' }],
+      },
+      timeoutMs: 20000,
+      isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        try {
+          const d = await watchdog(args.op ?? 'status', args.arg ?? '', { signal: exec?.signal });
+          if (d.ok === false) {
+            return { ok: false, detail: `看门狗不可用：${d.err ?? d.detail ?? '未知原因'}` };
+          }
+          const targets = d.targets ?? [];
+          const miss = d.missing ?? [];
+          const lines = [
+            `看门狗：${d.on ? '开' : '关'}　运行中：${d.running ? '是' : '否'}　写权限：${d.permitted ? '有' : '无'}`,
+            `盯 ${targets.length} 个服务，当前缺失 ${miss.length} 个，累计修复 ${d.fixes ?? 0} 次`,
+          ];
+          if (miss.length) lines.push(`缺失：${miss.join(' , ')}`);
+          if (d.action) lines.push(`本次动作：${d.action}`);
+          if (d.hint) lines.push(`提示：${d.hint}`);
+          if (d.last) lines.push(`最近事件：${d.last}`);
+          const detail = lines.join('\n');
+          return {
+            ok: true,
+            on: Boolean(d.on),
+            permitted: Boolean(d.permitted),
+            targets,
+            missing: miss,
+            fixes: Number(d.fixes ?? 0),
+            detail,
           };
         } catch (e) {
           return { ok: false, detail: String(e?.message ?? e) };

@@ -1,7 +1,7 @@
 // 冒烟测试：插件能否注册工具，以及能否真的打通 ESP32 通道。
 //
 //   node --test test/smoke.test.js
-//   DSH_ESP32_URL=http://192.168.1.50:8892 node --test test/smoke.test.js   # 真机联调
+//   DSH_ESP32_URL=http://192.168.43.16:8892 node --test test/smoke.test.js   # 真机联调
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -49,6 +49,7 @@ test('注册全部工具', () => {
     'esp32_tap_box',
     'esp32_text',
     'esp32_ui',
+    'esp32_watch',
   ]);
   for (const t of ctx._tools.values()) {
     assert.equal(typeof t.execute, 'function', `${t.name} 缺 execute`);

@@ -1,6 +1,6 @@
 {
   "name": "dsh-esp32-hid",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Drive an ESP32-S3 BLE HID bridge from DSH: tap, swipe, type, keys — plus screen capture and accessibility tree through the companion app bridge.",
   "engines": {
     "dsh": ">=0.2.1-rc.2 <0.3.0-0"

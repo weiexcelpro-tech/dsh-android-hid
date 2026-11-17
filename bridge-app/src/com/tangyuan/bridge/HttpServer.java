@@ -41,6 +41,8 @@ public class HttpServer {
         byte[] screenshotJpeg(int quality);
         /** 无障碍状态；tree=true 时附带前台控件树 */
         String a11yJson(boolean enable, boolean tree, int maxNodes);
+        /** 无障碍看门狗：状态 / 开关 / 立刻修复 / 增删目标 */
+        String watch(Map<String, String> q);
         void log(String s);
     }
 
@@ -177,6 +179,10 @@ public class HttpServer {
                     sock.close();
                     return;
                 }
+                // ---- 看门狗：/watch?op=status|on|off|fix|add|del&arg=... ----
+                case "/watch":
+                    resp = h.watch(q);
+                    break;
                 // ---- 感知层：无障碍状态（tree=1 时带前台控件树）----
                 case "/a11y":
                     resp = h.a11yJson("1".equals(q.get("enable")), "1".equals(q.get("tree")),
