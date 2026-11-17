@@ -1,0 +1,33 @@
+name: plugin-tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugin/**'
+      - '.github/workflows/plugin-tests.yml'
+  pull_request:
+    paths:
+      - 'plugin/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Run plugin tests
+        working-directory: plugin
+        # 测试全程用本地假桥（127.0.0.1:8893），不需要真机、不联网
+        # npm test 会先造一个 @deepseek-ai/dsh-tools 垫片，再跑 node --test
+        run: npm test

@@ -1,0 +1,68 @@
+{
+  "name": "dsh-esp32-hid",
+  "version": "0.4.0",
+  "description": "Drive an ESP32-S3 BLE HID bridge from DSH: tap, swipe, type, keys — plus screen capture and accessibility tree through the companion app bridge.",
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0-0"
+  },
+  "author": "靳伟的汤圆宝宝，浅绿色眼睛的长毛银渐层小猫咪",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node scripts/dev-stub.mjs && node --test test/",
+    "stub": "node scripts/dev-stub.mjs",
+    "live-check": "node scripts/live-check.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dshGo": {
+    "v": 1,
+    "title": {
+      "zh": "ESP32 键鼠",
+      "en": "ESP32 HID"
+    },
+    "icon": "keyboard",
+    "contributes": {
+      "panels": [
+        {
+          "id": "status",
+          "title": {
+            "zh": "ESP32 状态",
+            "en": "ESP32 status"
+          },
+          "icon": "info",
+          "placement": [
+            "plugin"
+          ]
+        }
+      ]
+    }
+  },
+  "repository": {
+    "type": "git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-go",
+    "esp32",
+    "ble",
+    "hid",
+    "android",
+    "automation",
+    "llm-agent"
+  ]
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  汤圆蓝牙桥的「眼睛」配置。
+  canTakeScreenshot: Android 11+ 的免授权截图（不需要 MediaProjection 弹窗）
+  canRetrieveWindowContent: 读控件树（文字 + 包围盒）
+  事件只订阅窗口变化，够用且省电
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/cap_desc"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:notificationTimeout="50" />

@@ -1,0 +1,27 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# PlatformIO 构建缓存（体积大，一律不入库）
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Android 构建产物
+build/
+*.apk
+*.idsig
+*.keystore
+*.jks
+*.p12
+
+# 运行时产物
+.esp32-shots/
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

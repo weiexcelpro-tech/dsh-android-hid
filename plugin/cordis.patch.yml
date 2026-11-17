@@ -1,0 +1,5 @@
+# 装到某个 profile 时应用：
+#   dsh plugin --profile web add /path/to/dsh-esp32-hid
+- insert:
+    - id: dsh-esp32-hid
+      name: dsh-esp32-hid
