@@ -20,7 +20,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node scripts/dev-stub.mjs && node --test test/",
+    "test": "node scripts/dev-stub.mjs && node --test test/*.test.js test/*.test.mjs",
     "stub": "node scripts/dev-stub.mjs",
     "live-check": "node scripts/live-check.mjs"
   },
