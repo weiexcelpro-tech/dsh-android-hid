@@ -213,9 +213,26 @@ public class BleClient {
         }
     }
 
+    /** 忘掉缓存地址：换了板子/板子没通电时，不该对着一个死 MAC 一直磕。 */
+    public void forgetSaved() {
+        ctx.getSharedPreferences("bridge", Context.MODE_PRIVATE).edit().remove("mac").apply();
+    }
+
     private void scheduleRetry(long ms) {
         if (!wantConnected) return;
         retry++;
+        // 连续失败两次还连不上，多半是缓存地址指向的板子不在了（换板子/断电）：
+        // 清掉它，下一轮改走「已配对设备 + 扫描」，而不是永远超时。
+        if (retry >= 2) {
+            String saved = ctx.getSharedPreferences("bridge", Context.MODE_PRIVATE).getString("mac", null);
+            if (saved != null && !saved.equalsIgnoreCase(deviceMac)) {
+                forgetSaved();
+                listener.onState("forget", "缓存地址连不上，改按名字重找");
+            } else if (saved != null) {
+                forgetSaved();
+                listener.onState("forget", "缓存地址连不上（" + saved + "），改按名字重找");
+            }
+        }
         long wait = Math.min(ms + retry * 500L, 8000);
         main.postDelayed(() -> { if (wantConnected) connectNow(); }, wait);
     }
