@@ -99,7 +99,16 @@ pio run -e esp32_c3_supermini -t upload --upload-port /dev/ttyACM0
 | 协议/工具/App | 完全相同 | 完全相同 |
 
 C3 的两处差异只在固件里用 `#if defined(CONFIG_IDF_TARGET_ESP32C3)` 隔离（日志串口引脚、USB 镜像），
-HID 描述符、坐标换算、看门狗、命令协议**一行没动**。
+HID 描述符、坐标换算、命令协议**一行没动**。
+
+**C3 实测（OnePlus 6T / LineageOS 22.2 / Android 15）**：烧录后手机自动完成配对
+（`BOND_STATE_BONDED`），`dumpsys input` 里出现 `Device: Tangyuan HID N`，
+`Sources: KEYBOARD | DPAD | MOUSE | STYLUS | JOYSTICK`；桥 App 连上后 MTU 255，
+HOME 键 / 长按 / 点击全部生效（点桌面「设置」直接进 `com.android.settings/.Settings`）。
+
+> ⚠️ **C3 上别把 MSYS 缓冲池调小**：`CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT` 压到 16 时，
+> 连发触摸报文会 `[hid] notify failed after 6 tries`，症状是**键盘能用、触摸点不动**。
+> 32 与 S3 一致才正常（C3 堆还剩 243 KB，完全够）。
 
 板子只要 5V 供电，**不需要联网**。换板子后手机要重新配对一次（BLE MAC 变了）。
 

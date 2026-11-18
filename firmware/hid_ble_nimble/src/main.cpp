@@ -31,7 +31,7 @@
 #define WITH_TOUCH 1
 #endif
 
-static const char *FW_VERSION = "0.6.6-swipedrain";
+static const char *FW_VERSION = "0.6.7-c3";
 static const char *DEVICE_NAME = "Tangyuan HID N";
 // 面板原生尺寸（竖屏固有分辨率），由 screen 命令下发；换任何机型都不用改固件
 static uint16_t PANEL_W = 1080;
